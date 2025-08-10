@@ -1,0 +1,109 @@
+version: "3.8"
+
+services:
+  mqtt-broker:
+    image: eclipse-mosquitto:latest
+    volumes:
+      - ./mqtt_configs/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    ports:
+      - "1883:1883" # MQTT
+      - "9001:9001" # WebSocket
+    networks:
+      - mqtt-net
+
+  mqtt-logger:
+    build:
+      context: ./backend_logging
+      dockerfile: Dockerfile
+    image: ${REGISTRY:-ghcr.io}/${REPO:-local}/mqtt-logger:${TAG:-dev}
+    environment:
+      - NODE_ENV=development
+      - MQTT_BROKER_URL=mqtt://mqtt-broker:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER:-mqtt_user}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-mqtt_password}
+      - DB_NAME=${POSTGRES_DB:-mqtt_logs}
+    depends_on:
+      - mqtt-broker
+      - postgres
+    networks:
+      - mqtt-net
+    volumes:
+      - ./backend_logging:/app
+      - /app/node_modules
+
+  mqtt-monitor:
+    build:
+      context: ./mqtt_configs
+      dockerfile: Dockerfile
+    image: ${REGISTRY:-ghcr.io}/${REPO:-local}/mqtt-monitor:${TAG:-dev}
+    environment:
+      - NODE_ENV=development
+      - MQTT_BROKER_URL=mqtt://mqtt-broker:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+      - MQTT_TOPICS=${MQTT_TOPICS:-["#"]}
+    depends_on:
+      - mqtt-broker
+    networks:
+      - mqtt-net
+    volumes:
+      - ./mqtt_configs:/app
+      - /app/node_modules
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER:-mqtt_user}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-mqtt_password}
+      - DB_NAME=${POSTGRES_DB:-mqtt_logs}
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    depends_on:
+      - postgres
+    networks:
+      - mqtt-net
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-mqtt_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mqtt_password}
+      - POSTGRES_DB=${POSTGRES_DB:-mqtt_logs}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - mqtt-net
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-mqtt_user} -d ${POSTGRES_DB:-mqtt_logs}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  mqtt-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  mosquitto-data:
+  mosquitto-log:

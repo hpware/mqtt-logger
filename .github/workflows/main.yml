@@ -1,22 +1,21 @@
 name: CI/CD Pipeline
 
 on:
+  release:
+    types: [published]
   push:
     branches:
       - main
-      - "release/**"
       - "feature/**"
       - "hotfix/**"
   pull_request:
     branches:
       - main
-      - "release/**"
 
 env:
   REGISTRY: ghcr.io
   LOGGER_IMAGE_NAME: ${{ github.repository }}/mqtt-logger
   MONITOR_IMAGE_NAME: ${{ github.repository }}/mqtt-monitor
-  VERSION: ${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
 
 jobs:
   version:
@@ -27,11 +26,10 @@ jobs:
       - name: Set Version
         id: set-version
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "version=latest" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" =~ ^refs/heads/release/.+ ]]; then
-            VERSION=$(echo ${{ github.ref_name }} | sed 's/release\///')
-            echo "version=${VERSION}" >> $GITHUB_OUTPUT
           else
             echo "version=${{ github.sha }}" >> $GITHUB_OUTPUT
           fi
@@ -85,6 +83,9 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.LOGGER_IMAGE_NAME }}
           tags: |
             type=raw,value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
             type=sha,prefix={{branch}}-
             type=ref,event=branch
             type=ref,event=pr
@@ -96,6 +97,9 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.MONITOR_IMAGE_NAME }}
           tags: |
             type=raw,value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
             type=sha,prefix={{branch}}-
             type=ref,event=branch
             type=ref,event=pr
