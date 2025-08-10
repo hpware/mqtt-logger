@@ -1,0 +1,117 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+      - "feature/**"
+      - "hotfix/**"
+  pull_request:
+    branches:
+      - main
+      - "release/**"
+
+env:
+  REGISTRY: ghcr.io
+  LOGGER_IMAGE_NAME: ${{ github.repository }}/mqtt-logger
+  MONITOR_IMAGE_NAME: ${{ github.repository }}/mqtt-monitor
+  VERSION: ${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+    steps:
+      - name: Set Version
+        id: set-version
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "version=latest" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" =~ ^refs/heads/release/.+ ]]; then
+            VERSION=$(echo ${{ github.ref_name }} | sed 's/release\///')
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: version
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      # Logger Service
+      - name: Install logger dependencies
+        working-directory: ./backend_logging
+        run: bun install --frozen-lockfile
+
+      - name: Build logger
+        working-directory: ./backend_logging
+        run: bun build ./app/app.ts --outdir ./dist
+
+      # Monitor Service
+      - name: Install monitor dependencies
+        working-directory: ./mqtt_configs
+        run: bun install --frozen-lockfile
+
+      - name: Build monitor
+        working-directory: ./mqtt_configs
+        run: bun build ./src/index.ts --outdir ./dist
+
+      # Docker Build and Push
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for logger Docker
+        id: meta-logger
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.LOGGER_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Extract metadata for monitor Docker
+        id: meta-monitor
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.MONITOR_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build and push logger Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend_logging
+          push: true
+          tags: ${{ steps.meta-logger.outputs.tags }}
+          labels: ${{ steps.meta-logger.outputs.labels }}
+
+      - name: Build and push monitor Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mqtt_configs
+          push: true
+          tags: ${{ steps.meta-monitor.outputs.tags }}
+          labels: ${{ steps.meta-monitor.outputs.labels }}
