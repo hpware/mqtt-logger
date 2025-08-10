@@ -1,8 +1,12 @@
 {
   "name": "api-layer",
-  "module": "index.ts",
+  "module": "run/index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "bun run app/app.ts",
+    "init": "bun run app/init.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
