@@ -1,8 +1,9 @@
 import { mqtt, sql } from "./clients";
 import { randomUUIDv7 } from "bun";
 mqtt.on("connect", () => {
-  mqtt.subscribe("#", { qos: 0 }, (err) => {
+  mqtt.subscribe("#", { qos: 0 }, async (err) => {
     if (err) {
+      await sql`INSERT INTO errorsys (uuid, source, errormsg) VALUES (${randomUUIDv7()}, ${"mqtt"}, ${err.toString()})`;
       console.log(err);
       process.exit(1);
     }
@@ -11,7 +12,7 @@ mqtt.on("connect", () => {
 
 mqtt.on("reconnect", () => console.log("Reconnecting..."));
 mqtt.on("error", async (err) => {
-  await sql`INSERT INTO errorsys (uuid, source, errormsg) VALUES (${randomUUIDv7()}, "mqtt", ${err})`;
+  await sql`INSERT INTO errorsys (uuid, source, errormsg) VALUES (${randomUUIDv7()}, ${"mqtt"}, ${err.toString()})`;
   console.error("MQTT error:", err);
 });
 
